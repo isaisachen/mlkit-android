@@ -62,6 +62,10 @@ import java.util.PriorityQueue;
 
 public class MainActivity extends AppCompatActivity implements AdapterView.OnItemSelectedListener {
     private static final String TAG = "MainActivity";
+
+    private static final int IMAGE_MEAN = 128;
+    private static final float IMAGE_STD = 128.0f;
+
     private Button mRun;
     private ImageView mImageView;
     private Bitmap mSelectedImage;
@@ -76,7 +80,9 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
      * Name of the model file hosted with Firebase.
      */
     private static final String HOSTED_MODEL_NAME = "mobilenet_v1_224_quant";
-    private static final String LOCAL_MODEL_ASSET = "mobilenet_v1.0_224_quant.tflite";
+    //private static final String LOCAL_MODEL_ASSET = "mobilenet_v1.0_224_quant.tflite";
+    private static final String LOCAL_MODEL_ASSET = "inceptionv3_slim_2016.tflite";
+
     /**
      * Name of the label file stored in Assets.
      */
@@ -90,8 +96,8 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
      */
     private static final int DIM_BATCH_SIZE = 1;
     private static final int DIM_PIXEL_SIZE = 3;
-    private static final int DIM_IMG_SIZE_X = 224;
-    private static final int DIM_IMG_SIZE_Y = 224;
+    private static final int DIM_IMG_SIZE_X = 299;
+    private static final int DIM_IMG_SIZE_Y = 299;
     /**
      * Labels corresponding to the output of the vision model.
      */
@@ -150,8 +156,8 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         try {
             mDataOptions =
                     new FirebaseModelInputOutputOptions.Builder()
-                            .setInputFormat(0, FirebaseModelDataType.BYTE, inputDims)
-                            .setOutputFormat(0, FirebaseModelDataType.BYTE, outputDims)
+                            .setInputFormat(0, FirebaseModelDataType.FLOAT32, inputDims)
+                            .setOutputFormat(0, FirebaseModelDataType.FLOAT32, outputDims)
                             .build();
             FirebaseModelDownloadConditions conditions = new FirebaseModelDownloadConditions
                     .Builder()
@@ -171,10 +177,10 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
                     .build();
             FirebaseModelManager manager = FirebaseModelManager.getInstance();
             manager.registerLocalModelSource(localModelSource);
-            manager.registerCloudModelSource(cloudSource);
+            //manager.registerCloudModelSource(cloudSource);
             FirebaseModelOptions modelOptions =
                     new FirebaseModelOptions.Builder()
-                            .setCloudModelName(HOSTED_MODEL_NAME)
+                            //.setCloudModelName(HOSTED_MODEL_NAME)
                             .setLocalModelName("asset")
                             .build();
             mInterpreter = FirebaseModelInterpreter.getInstance(modelOptions);
@@ -209,8 +215,8 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
                             new Continuation<FirebaseModelOutputs, List<String>>() {
                                 @Override
                                 public List<String> then(Task<FirebaseModelOutputs> task) {
-                                    byte[][] labelProbArray = task.getResult()
-                                            .<byte[][]>getOutput(0);
+                                    float[][] labelProbArray = task.getResult()
+                                            .<float[][]>getOutput(0);
                                     List<String> topLabels = getTopLabels(labelProbArray);
                                     mGraphicOverlay.clear();
                                     GraphicOverlay.Graphic labelGraphic = new LabelGraphic
@@ -229,11 +235,14 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
     /**
      * Gets the top labels in the results.
      */
-    private synchronized List<String> getTopLabels(byte[][] labelProbArray) {
+    private synchronized List<String> getTopLabels(float[][] labelProbArray) {
         for (int i = 0; i < mLabelList.size(); ++i) {
+            // Change #3: all output handling
             sortedLabels.add(
+                    new AbstractMap.SimpleEntry<>(mLabelList.get(i), labelProbArray[0][i]));
+            /*sortedLabels.add(
                     new AbstractMap.SimpleEntry<>(mLabelList.get(i), (labelProbArray[0][i] &
-                            0xff) / 255.0f));
+                            0xff) / 255.0f));*/
             if (sortedLabels.size() > RESULTS_TO_SHOW) {
                 sortedLabels.poll();
             }
@@ -273,7 +282,8 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
             Bitmap bitmap, int width, int height) {
         ByteBuffer imgData =
                 ByteBuffer.allocateDirect(
-                        DIM_BATCH_SIZE * DIM_IMG_SIZE_X * DIM_IMG_SIZE_Y * DIM_PIXEL_SIZE);
+                        // Change #1: 4 bytes per channel for float model
+                        4 * DIM_BATCH_SIZE * DIM_IMG_SIZE_X * DIM_IMG_SIZE_Y * DIM_PIXEL_SIZE);
         imgData.order(ByteOrder.nativeOrder());
         Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, DIM_IMG_SIZE_X, DIM_IMG_SIZE_Y,
                 true);
@@ -285,9 +295,13 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         for (int i = 0; i < DIM_IMG_SIZE_X; ++i) {
             for (int j = 0; j < DIM_IMG_SIZE_Y; ++j) {
                 final int val = intValues[pixel++];
-                imgData.put((byte) ((val >> 16) & 0xFF));
-                imgData.put((byte) ((val >> 8) & 0xFF));
-                imgData.put((byte) (val & 0xFF));
+                //imgData.put((byte) ((val >> 16) & 0xFF));
+                //imgData.put((byte) ((val >> 8) & 0xFF));
+                //imgData.put((byte) (val & 0xFF));
+                // Change #2: Populate float values instead
+                imgData.putFloat((((val >> 16) & 0xFF) - IMAGE_MEAN) / IMAGE_STD);
+                imgData.putFloat((((val >> 8) & 0xFF) - IMAGE_MEAN) / IMAGE_STD);
+                imgData.putFloat(((val & 0xFF) - IMAGE_MEAN) / IMAGE_STD);
             }
         }
         return imgData;
